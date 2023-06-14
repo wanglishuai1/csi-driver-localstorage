@@ -1,111 +1,89 @@
----
-kind: DaemonSet
-apiVersion: apps/v1
+kind: DaemonSet # 指定资源类型为 DaemonSet
+apiVersion: apps/v1 # 使用 apps/v1 API 版本
 metadata:
-  name: pixiu-localstorage-node
-  namespace: kube-system
+  name: pixiu-localstorage-node # 指定 DaemonSet 的名称
+  namespace: kube-system # 指定 DaemonSet 所在的命名空间
 spec:
-  updateStrategy:
-    rollingUpdate:
-      maxUnavailable: 1
-    type: RollingUpdate
+  updateStrategy: # 指定 DaemonSet 的更新策略
+    rollingUpdate: # 使用滚动更新策略
+      maxUnavailable: 1 # 指定滚动更新过程中最大可不可用的 Pod 数量
+    type: RollingUpdate # 更新类型为滚动更新
   selector:
-    matchLabels:
-      app: csi-ls-node
-  template:
+    matchLabels: # 指定用于选择 Pods 的标签
+      app: csi-ls-node # Pods 必须有 app=csi-ls-node 标签才会被此 DaemonSet 控制
+  template: # 定义 Pod 的模板
     metadata:
-      labels:
+      labels: # 指定创建的 Pods 的标签
         app: csi-ls-node
     spec:
-#      hostNetwork: true
-      dnsPolicy: Default  # available values: Default, ClusterFirstWithHostNet, ClusterFirst
-      serviceAccountName: csi-ls-node-sa
-      nodeSelector:
-        kubernetes.io/os: linux
-      tolerations:
-        - operator: "Exists"
-      containers:
-        - name: liveness-probe
-          image: pixiuio/livenessprobe:v2.8.0
-          args:
+      #      hostNetwork: true
+      dnsPolicy: Default  # DNS 解析策略
+      serviceAccountName: csi-ls-node-sa # Pod 使用的服务帐户名称
+      nodeSelector: # 定义节点选择器
+        kubernetes.io/os: linux # 选择操作系统为 Linux 的节点
+      tolerations: # 指定容忍度
+        - operator: "Exists" # 容忍所有的 taints
+      containers: # 定义容器
+        - name: liveness-probe # 容器的名称
+          image: pixiuio/livenessprobe:v2.8.0 # 容器的镜像
+          imagePullPolicy: "IfNotPresent" # 如果镜像已经存在，则不再尝试拉取
+          args: # 容器的参数
             - --csi-address=/csi/csi.sock
             - --probe-timeout=3s
             - --health-port=29653
             - --v=2
-          volumeMounts:
+          volumeMounts: # 定义容器中的挂载点
             - name: socket-dir
               mountPath: /csi
-          resources:
+          resources: # 定义资源请求和限制
             limits:
               memory: 100Mi
             requests:
               cpu: 10m
               memory: 20Mi
-
-#        - name: node-driver-registrar
-#          image: pixiuio/csi-node-driver-registrar:v2.6.2
-#          args:
-#            - --v=2
-#            - --csi-address=/csi/csi.sock
-#            - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
-#          livenessProbe:
-#            exec:
-#              command:
-#                - /csi-node-driver-registrar
-#                - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
-#                - --mode=kubelet-registration-probe
-#            initialDelaySeconds: 30
-#            timeoutSeconds: 15
-#          env:
-#            - name: DRIVER_REG_SOCK_PATH
-#              value: /var/lib/kubelet/plugins_registry/localstorage.csi.caoyingjunz.io-reg.sock
-#            - name: KUBE_NODE_NAME
-#              valueFrom:
-#                fieldRef:
-#                  fieldPath: spec.nodeName
-#          volumeMounts:
-#            - name: socket-dir
-#              mountPath: /csi
-#            - name: registration-dir
-#              mountPath: /registration
-#          resources:
-#            limits:
-#              memory: 100Mi
-#            requests:
-#              cpu: 10m
-#              memory: 20Mi
-
+        # 定义了第二个容器 "csi-provisioner"
         - name: csi-provisioner
+          # 指定容器的镜像
           image: jacky06/csi-provisioner:v0.1
+          # 如果镜像不在本地，Kubernetes会尝试下载该镜像
+          imagePullPolicy: "IfNotPresent"
+          # 定义容器启动时的参数
           args:
             - -v=5
             - --csi-address=/csi/csi.sock
+          # 定义环境变量，其中的值来自Kubernetes的字段引用
           env:
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          # 该容器运行为特权模式
           securityContext:
-            # This is necessary only for systems with SELinux, where
-            # non-privileged sidecar containers cannot access unix domain socket
-            # created by privileged CSI driver container.
             privileged: true
+          # 定义容器的卷挂载点
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
 
+        # 定义了第三个容器 "localstorage"
         - name: localstorage
+          # 该容器运行为特权模式
           securityContext:
             privileged: true
+            # 添加额外的Linux功能
             capabilities:
-              add: ["SYS_ADMIN"]
+              add: [ "SYS_ADMIN" ]
+            # 允许特权升级
             allowPrivilegeEscalation: true
+          # 指定容器的镜像
           image: pixiuio/lsplugin:v1.0.0
+          # 定义容器启动时的参数
           args:
             - "-v=5"
             - "--endpoint=$(CSI_ENDPOINT)"
             - "--nodeid=$(KUBE_NODE_NAME)"
             - "--volume-dir=/data"
+          # 定义环境变量，其中的值来自Kubernetes的字段引用
           env:
             - name: NODE_ID
               valueFrom:
@@ -113,47 +91,12 @@ spec:
                   fieldPath: spec.nodeName
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
-          ports:
-            - containerPort: 29653
-              name: healthz
-              protocol: TCP
-          livenessProbe:
-            failureThreshold: 5
-            httpGet:
-              path: /healthz
-              port: healthz
-            initialDelaySeconds: 30
-            timeoutSeconds: 10
-            periodSeconds: 30
-          imagePullPolicy: "IfNotPresent"
-          volumeMounts:
-            - name: socket-dir
-              mountPath: /csi
-            - name: pods-mount-dir
-              mountPath: /var/lib/kubelet/pods
-              mountPropagation: "Bidirectional"
-            - mountPath: /data
-              name: volume-dir
-          resources:
-            limits:
-              memory: 300Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
-      volumes:
-        - name: socket-dir
-          hostPath:
-            path: /var/lib/kubelet/plugins/csi-lsplugin
-            type: DirectoryOrCreate
-        - name: pods-mount-dir
-          hostPath:
-            path: /var/lib/kubelet/pods
-            type: Directory
-        - hostPath:
-            path: /var/lib/kubelet/plugins_registry
-            type: Directory
-          name: registration-dir
-        - hostPath:
-            path: /data
-            type: DirectoryOrCreate
-          name: volume-dir
+
+#以上代码是一个 Kubernetes 的 DaemonSet 配置，创建一个名为 pixiu-localstorage-node 的 DaemonSet，
+# 用于在每个节点上运行一个 CSI (Container Storage Interface) 插件。
+# DaemonSet 的工作方式是，当有新节点添加到集群中时，Kubernetes 会自动在新节点上添加对应的 Pods。
+# 如果节点从集群中移除，那么这些 Pods 也会被垃圾回收。
+# 这个 DaemonSet 包括三个容器：liveness-probe，csi-provisioner，以及 localstorage。
+# 它们分别用于探测插件的健康状态，提供 CSI 功能，以及提供本地存储功能。
+# 这些容器共享一个 Unix Socket，用于容器之间的通信。
+# DaemonSet 使用滚动更新策略，如果更新 DaemonSet，它将一次替换一个 Pod，直到所有 Pods 都更新为止。

@@ -2,24 +2,24 @@
 # More document can be found at https://docs.cert-manager.io
 # WARNING: Targets CertManager v1.0. Check https://cert-manager.io/docs/installation/upgrading/ for breaking changes.
 apiVersion: cert-manager.io/v1
-kind: Issuer
+kind: Issuer # 创建一个 Issuer Issuser 用于签发证书
 metadata:
-  name: selfsigned-issuer
-  namespace: kube-system
+  name: selfsigned-issuer #   指定 Issuser 名称为 selfsigned-issuer
+  namespace: kube-system #  指定 Issuser 所在的命名空间为 kube-system
 spec:
-  selfSigned: {}
+  selfSigned: { } # 指定 Issuser 为自签发
 ---
 apiVersion: cert-manager.io/v1
-kind: Certificate
+kind: Certificate # 创建一个 Certificate 用于签发证书（Certificate释义:证书）
 metadata:
-  name: serving-cert
-  namespace: kube-system
+  name: serving-cert # 指定 Certificate 名称为 serving-cert
+  namespace: kube-system # 指定 Certificate 所在的命名空间为 kube-system
 spec:
-  dnsNames:
+  dnsNames: # 指定证书的域名
     - 127.0.0.1
-    - webhook-service.kube-system.svc
-    - webhook-service.kube-system.svc.cluster.local
-  issuerRef:
+    - webhook-service.kube-system.svc # 指定证书的域名
+    - webhook-service.kube-system.svc.cluster.local # 指定证书的域名
+  issuerRef: # 指定签发证书的 Issuser
     kind: Issuer
-    name: selfsigned-issuer
-  secretName: webhook-server-cert
+    name: selfsigned-issuer # 指定签发证书的 Issuser , 证书将会由这个 Issuser 签发
+  secretName: webhook-server-cert # 指定证书的 Secret , 证书将会存储在这个 Secret 中

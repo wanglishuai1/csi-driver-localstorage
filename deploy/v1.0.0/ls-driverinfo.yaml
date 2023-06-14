@@ -1,10 +1,11 @@
 ---
 apiVersion: storage.k8s.io/v1
-kind: CSIDriver
+kind: CSIDriver # 创建一个 CSIDriver（CSI 驱动）
 metadata:
-  name: localstorage.caoyingjunz.io
+  name: localstorage.caoyingjunz.io # 指定 CSI 驱动名称
 spec:
-  attachRequired: false
-  volumeLifecycleModes:
-    - Persistent
-  fsGroupPolicy: File
+  attachRequired: false # 指定是否需要挂载
+  volumeLifecycleModes: # 指定卷生命周期模式为Persistent(持久化)
+    - Persistent # 有Ephemeral(临时)和Persistent(持久化)两种模式
+  fsGroupPolicy: File # 指定文件组策略为File(文件)
+# 总结：CSI 驱动的创建，需要创建 CSIDriver 和 StorageClass 两个资源，其中 CSIDriver 用于指定 CSI 驱动的名称，StorageClass 用于指定 CSI 驱动的名称、挂载选项、参数、回收策略和绑定模式等。

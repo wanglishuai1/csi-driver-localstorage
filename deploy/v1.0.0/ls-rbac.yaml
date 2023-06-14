@@ -1,15 +1,15 @@
 ---
 apiVersion: v1
-kind: ServiceAccount
+kind: ServiceAccount # 创建一个 ServiceAccount（服务账号）
 metadata:
-  name: csi-ls-node-sa
-  namespace: kube-system
+  name: csi-ls-node-sa # 指定名称 csi-ls-node-sa
+  namespace: kube-system # 指定命名空间为 kube-system
 ---
 
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole # 创建一个 ClusterRole（集群角色）
+apiVersion: rbac.authorization.k8s.io/v1 # 指定 API 版本
 metadata:
-  name: ls-external-provisioner-role
+  name: ls-external-provisioner-role # 指定角色名称为 ls-external-provisioner-role
 rules:
   - apiGroups: [""]
     resources: ["persistentvolumes"]
@@ -40,15 +40,16 @@ rules:
     verbs: ["get"]
 ---
 
-kind: ClusterRoleBinding
+kind: ClusterRoleBinding # 创建一个 ClusterRoleBinding（集群角色绑定）
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: ls-csi-provisioner-binding
-subjects:
-  - kind: ServiceAccount
-    name: csi-ls-node-sa
-    namespace: kube-system
-roleRef:
-  kind: ClusterRole
-  name: ls-external-provisioner-role
-  apiGroup: rbac.authorization.k8s.io
+  name: ls-csi-provisioner-binding # 名称为 ls-csi-provisioner-binding
+subjects: # 指定绑定的角色
+  - kind: ServiceAccount # 绑定的角色为 ServiceAccount
+    name: csi-ls-node-sa # 名称为 csi-ls-node-sa
+    namespace: kube-system # 命名空间为 kube-system
+roleRef: # roleRef 指定绑定的角色
+  kind: ClusterRole # 绑定的角色为 ClusterRole
+  name: ls-external-provisioner-role # 名称为 ls-external-provisioner-role
+  apiGroup: rbac.authorization.k8s.io # API 组为 rbac.authorization.k8s.io
+## 总结：这里创建了一个集群角色绑定，绑定了一个集群角色，这个集群角色有很多权限，包括对存储类、存储卷、存储卷声明、存储卷附件、存储卷节点、节点、事件、租约、密钥等的操作权限。
