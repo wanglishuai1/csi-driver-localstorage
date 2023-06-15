@@ -32,7 +32,6 @@ import (
 	"k8s.io/klog/v2"
 
 	localstoragev1 "github.com/caoyingjunz/csi-driver-localstorage/pkg/apis/localstorage/v1"
-	"github.com/caoyingjunz/csi-driver-localstorage/pkg/cache"
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/util"
 )
 
@@ -58,7 +57,7 @@ func (ls *localStorage) CreateVolume(ctx context.Context, req *csi.CreateVolumeR
 	ls.lock.Lock()
 	defer ls.lock.Unlock()
 
-	lsObj, err := ls.getLocalStorageByNode(ls.GetNode())
+	localstorage, err := ls.getLocalStorageByNode(ls.GetNode())
 	if err != nil {
 		return nil, err
 	}
@@ -71,22 +70,21 @@ func (ls *localStorage) CreateVolume(ctx context.Context, req *csi.CreateVolumeR
 		return nil, err
 	}
 
+	// Deep-copy otherwise we are mutating our cache.
+	// TODO: Deep-copy only when needed.
+	s := localstorage.DeepCopy()
+
 	volSize := req.GetCapacityRange().GetRequiredBytes()
-	vol := cache.Volume{
+	util.AddVolume(s, localstoragev1.Volume{
 		VolID:   volumeID,
 		VolName: req.GetName(),
 		VolPath: path,
 		VolSize: volSize,
-	}
+	})
+	s.Status.Allocatable = ls.calculateAllocatedSize(s.Status.Allocatable, volSize, SubOperation)
 
-	newObj := lsObj.DeepCopy()
-	newObj.Status.Allocatable = ls.calculateAllocatedSize(newObj.Status.Allocatable, volSize, SubOperation)
-	if _, err = ls.client.StorageV1().LocalStorages().Update(ctx, newObj, metav1.UpdateOptions{}); err != nil {
-		return nil, err
-	}
-
-	klog.V(2).Infof("adding cache localstorage volume: %s = %v", volumeID, vol)
-	if err := ls.cache.SetVolume(vol); err != nil {
+	// Update the changes immediately
+	if _, err = ls.client.StorageV1().LocalStorages().Update(ctx, s, metav1.UpdateOptions{}); err != nil {
 		return nil, err
 	}
 
@@ -117,24 +115,21 @@ func (ls *localStorage) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeR
 	ls.lock.Lock()
 	defer ls.lock.Unlock()
 
-	lsObj, err := ls.getLocalStorageByNode(ls.GetNode())
+	localstorage, err := ls.getLocalStorageByNode(ls.GetNode())
 	if err != nil {
 		return nil, err
 	}
 	volId := req.GetVolumeId()
 
-	toDel, err := ls.cache.GetVolumeByID(volId)
-	if err != nil {
-		return nil, err
-	}
-	newObj := lsObj.DeepCopy()
-	newObj.Status.Allocatable = ls.calculateAllocatedSize(newObj.Status.Allocatable, toDel.VolSize, AddOperation)
-	if _, err = ls.client.StorageV1().LocalStorages().Update(ctx, newObj, metav1.UpdateOptions{}); err != nil {
-		return nil, err
-	}
+	// Deep-copy otherwise we are mutating our cache.
+	// TODO: Deep-copy only when needed.
+	s := localstorage.DeepCopy()
 
-	klog.Infof("deleting cache localstorage volume: %s", volId)
-	if err := ls.cache.DeleteVolume(volId); err != nil {
+	vol := util.RemoveVolume(s, volId)
+	s.Status.Allocatable = ls.calculateAllocatedSize(s.Status.Allocatable, vol.VolSize, AddOperation)
+
+	// Update the changes immediately
+	if _, err = ls.client.StorageV1().LocalStorages().Update(ctx, s, metav1.UpdateOptions{}); err != nil {
 		return nil, err
 	}
 
