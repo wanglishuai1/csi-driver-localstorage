@@ -77,7 +77,7 @@ func New(storeFile string) (Cache, error) {
 	return c, c.restore()
 }
 
-// 将Volume对象存储到cache中
+// 将Volume对象存储到cache中(每次涉及到修改cache都会调用这个方法)
 func (c *cache) dump() error {
 	data, err := json.Marshal(c.Volumes)
 	if err != nil {
@@ -167,6 +167,7 @@ func (c *cache) SetVolume(volume Volume) error {
 	return c.dump()
 }
 
+// 根据volume ID删除volume对象
 func (c *cache) DeleteVolume(volID string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
