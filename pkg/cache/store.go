@@ -19,13 +19,13 @@ package cache
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"sync"
-
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"os"
+	"sync"
 )
 
+// Volume represents a volume in the cache.
 type Volume struct {
 	VolName  string
 	VolID    string
@@ -35,6 +35,7 @@ type Volume struct {
 	Attached bool
 }
 
+// 定义Cache接口
 type Cache interface {
 	// GetVolumeByID retrieves a volume by its unique ID or returns
 	// an error including that ID when not found.
@@ -58,14 +59,15 @@ type Cache interface {
 	DeleteVolume(volID string) error
 }
 
+// 定义cache结构体其中包含了一个map类型的volumes字段，用于存储Volume对象，以及一个storeFile字段，用于存储数据的文件路径，还有一个lock字段，用于保证并发安全。
 type cache struct {
 	Volumes map[string]Volume
 
 	storeFile string
-	lock      sync.Mutex
+	lock      sync.Mutex // 互斥锁 protects volumes
 }
 
-var _ Cache = &cache{}
+var _ Cache = &cache{} // cache implements Cache interface
 
 func New(storeFile string) (Cache, error) {
 	c := &cache{
@@ -75,12 +77,13 @@ func New(storeFile string) (Cache, error) {
 	return c, c.restore()
 }
 
+// 将Volume对象存储到cache中
 func (c *cache) dump() error {
 	data, err := json.Marshal(c.Volumes)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error encoding volumes: %v", err)
 	}
-
+	// 将数据写入到storeFile文件中，0660表示仅有文件所有者和所属组的用户有读写权限
 	if err := os.WriteFile(c.storeFile, data, 0660); err != nil {
 		return status.Errorf(codes.Internal, "error writing store file: %v", err)
 	}
@@ -88,6 +91,7 @@ func (c *cache) dump() error {
 	return nil
 }
 
+// 从storeFile文件中恢复数据到cache中
 func (c *cache) restore() error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -110,6 +114,7 @@ func (c *cache) restore() error {
 	return nil
 }
 
+// 根据volume ID获取volume对象
 func (c *cache) GetVolumeByID(volID string) (Volume, error) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -122,6 +127,7 @@ func (c *cache) GetVolumeByID(volID string) (Volume, error) {
 	return vol, nil
 }
 
+// 根据volume name获取volume对象
 func (c *cache) GetVolumeByName(volName string) (Volume, error) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -135,6 +141,7 @@ func (c *cache) GetVolumeByName(volName string) (Volume, error) {
 	return Volume{}, status.Errorf(codes.NotFound, "volume name %s does not exist in the volumes list", volName)
 }
 
+// 获取所有的volume对象
 func (c *cache) GetVolumes() []Volume {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -147,6 +154,7 @@ func (c *cache) GetVolumes() []Volume {
 	return volumes
 }
 
+// 将volume对象存储到cache中
 func (c *cache) SetVolume(volume Volume) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
