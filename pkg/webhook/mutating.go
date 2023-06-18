@@ -71,12 +71,14 @@ func (s *LocalstorageMutate) Handle(ctx context.Context, req admission.Request) 
 }
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
+// 默认实现webhook. Defaulter，因此将为该类型注册一个网络钩子
 func (s *LocalstorageMutate) Default(ls *localstoragev1.LocalStorage, op admissionv1.Operation, fn ...SetFunc) {
 	for _, f := range fn {
 		f(ls, op)
 	}
 }
 
+// SetStatus 设置状态为挂起，当创建时
 func (s *LocalstorageMutate) SetStatus(ls *localstoragev1.LocalStorage, op admissionv1.Operation) {
 	if op == admissionv1.Create {
 		if len(ls.Status.Phase) == 0 {
@@ -85,7 +87,7 @@ func (s *LocalstorageMutate) SetStatus(ls *localstoragev1.LocalStorage, op admis
 	}
 }
 
-// SetDisks set the identifier to empty if provider when Created
+// SetDisks 在创建LocalStorage对象时，对其磁盘列表进行清理，只保留那些有名称的磁盘，且只保留磁盘的名称，其他磁盘的信息都被忽略
 func (s *LocalstorageMutate) SetDisks(ls *localstoragev1.LocalStorage, op admissionv1.Operation) {
 	if op == admissionv1.Create {
 		disks := ls.Spec.Disks
@@ -105,6 +107,7 @@ func (s *LocalstorageMutate) SetDisks(ls *localstoragev1.LocalStorage, op admiss
 	}
 }
 
+// SetVolumes 在创建时将Volumes置为nil
 func (s *LocalstorageMutate) SetVolumes(ls *localstoragev1.LocalStorage, op admissionv1.Operation) {
 	if op == admissionv1.Create {
 		if len(ls.Status.Volumes) != 0 {
