@@ -78,6 +78,8 @@ func CreateRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
 	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: LocalstorageManagerUserAgent})
 }
 
+// BytesToQuantity converts bytes to resource.Quantity
+// (Kubernetes API 用来表示计算资源数量的结构体。例如，CPU、内存、存储等资源的量度都可以使用 resource.Quantity 来表示)
 func BytesToQuantity(bytes int64) resource.Quantity {
 	quantity := resource.NewQuantity(bytes, resource.BinarySI)
 	return *quantity

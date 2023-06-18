@@ -23,10 +23,12 @@ import (
 	"github.com/golang/protobuf/ptypes/wrappers"
 )
 
+// IdentityServer is the implementation of the CSI IdentityServer(IdentityServer是CSI IdentityServer的实现)
 type IdentityServer struct {
 	Driver *localStorage
 }
 
+// GetPluginInfo 返回插件的信息
 func (ls *localStorage) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
 	return &csi.GetPluginInfoResponse{
 		Name:          ls.config.DriverName,
@@ -34,17 +36,19 @@ func (ls *localStorage) GetPluginInfo(ctx context.Context, req *csi.GetPluginInf
 	}, nil
 }
 
+// Probe 返回插件的健康和可用性
 func (ls *localStorage) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
 	return &csi.ProbeResponse{Ready: &wrappers.BoolValue{Value: true}}, nil
 }
 
+// GetPluginCapabilities 返回插件的可用功能
 func (ls *localStorage) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
 	return &csi.GetPluginCapabilitiesResponse{
-		Capabilities: []*csi.PluginCapability{
+		Capabilities: []*csi.PluginCapability{ //
 			{
 				Type: &csi.PluginCapability_Service_{
 					Service: &csi.PluginCapability_Service{
-						Type: csi.PluginCapability_Service_CONTROLLER_SERVICE,
+						Type: csi.PluginCapability_Service_CONTROLLER_SERVICE, // 本地存储驱动只支持控制器服务
 					},
 				},
 			},

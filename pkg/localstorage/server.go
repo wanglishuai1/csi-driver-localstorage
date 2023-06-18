@@ -67,41 +67,47 @@ func (s *nonBlockingGRPCServer) ForceStop() {
 }
 
 func (s *nonBlockingGRPCServer) serve(endpoint string, ids csi.IdentityServer, cs csi.ControllerServer, ns csi.NodeServer) {
+	// Parse endpoint
 	proto, addr, err := parseEndpoint(endpoint)
 	if err != nil {
 		klog.Fatalf("Failed to parse unix endpoint: %v", err)
 	}
-
 	if proto == "unix" {
 		addr = "/" + addr
 		if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
 			klog.Fatalf("Failed to remove %s, error: %s", addr, err.Error())
 		}
 	}
-
+	//开始监听
 	listener, err := net.Listen(proto, addr)
 	if err != nil {
 		klog.Fatalf("Failed to listen: %v", err)
 	}
 
 	opts := []grpc.ServerOption{
-		grpc.UnaryInterceptor(logGRPC),
+		grpc.UnaryInterceptor(logGRPC), //日志拦截器
 	}
+	//创建grpc server
 	server := grpc.NewServer(opts...)
+	//服务赋值
 	s.server = server
-
+	//注册Identity服务
 	if ids != nil {
 		csi.RegisterIdentityServer(server, ids)
 	}
+	//注册Controller服务
 	if cs != nil {
 		csi.RegisterControllerServer(server, cs)
 	}
+	//注册Node服务
 	if ns != nil {
 		csi.RegisterNodeServer(server, ns)
 	}
-
+	//打印监听地址
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
+	//开始监听并处理客户端请求
 	err = server.Serve(listener)
+	//服务启动失败
 	if err != nil {
 		klog.Fatalf("Failed to serve grpc server: %v", err)
 	}

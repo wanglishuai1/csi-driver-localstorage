@@ -26,8 +26,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
+/*
+解析 endpoint，返回协议、地址和错误。
+例如，如果 ep 是 "unix:///var/run/csi.sock"，那么这个函数会返回 "unix"、"/var/run/csi.sock" 和 nil。
+如果 ep 是 "unix://"，那么这个函数会返回 ""、"" 和一个错误
+*/
 func parseEndpoint(ep string) (string, string, error) {
+	//判断是否是unix socket
 	if strings.HasPrefix(strings.ToLower(ep), "unix://") {
+		//用://分割字符串
 		s := strings.SplitN(ep, "://", 2)
 		if s[1] != "" {
 			return s[0], s[1], nil
@@ -36,6 +43,9 @@ func parseEndpoint(ep string) (string, string, error) {
 	return "", "", fmt.Errorf("invalid endpoint: %v", ep)
 }
 
+/*
+gRPC的拦截器函数，用于在gRPC调用过程中进行日志记录
+*/
 func logGRPC(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	klog.V(2).Infof("GRPC call: %s", info.FullMethod)
 
@@ -47,6 +57,9 @@ func logGRPC(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, h
 	return resp, err
 }
 
+/*
+创建volume目录
+*/
 func makeVolumeDir(volDir string) error {
 	_, err := os.Stat(volDir)
 	if err != nil {

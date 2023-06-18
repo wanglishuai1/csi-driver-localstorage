@@ -81,59 +81,66 @@ var (
 	renewDeadline     = flag.Int("leader-elect-renew-deadline", RenewDeadline, "The interval between attempts by the acting master to renew a leadership slot before it stops leading.")
 )
 
+// 用来设置日志参数
 func init() {
 	_ = flag.Set("logtostderr", "true")
 }
 
 func main() {
+	//解析了命令行参数
 	klog.InitFlags(nil)
 	flag.Parse()
 
-	// set up signals so we handle the shutdown signal gracefully
+	// set up signals so we handle the shutdown signal gracefully(设置信号，以便我们优雅地处理关机信号)
+	//设置了信号处理器用来处理终止信号
 	ctx := signals.SetupSignalHandler()
-
+	//创建了 kubeconfig 客户端，并使用它来创建 webhookManager。
 	kubeConfig, err := util.BuildClientConfig(*kubeconfig)
 	if err != nil {
 		klog.Fatalf("Failed to build kube config: %v", err)
 	}
-	kubeConfig.QPS = float32(*kubeAPIQPS)
+	kubeConfig.QPS = float32(*kubeAPIQPS) //设置了 QPS 和 Burst 参数
 	kubeConfig.Burst = *kubeAPIBurst
-
+	//webhookManager 是 controller-runtime 包的一个组件，用于管理和运行 Webhook 服务器
 	webhookManager, err := manager.New(kubeConfig, manager.Options{
 		Scheme: runtime.NewScheme(),
 		Host:   *host,
 		Port:   *port,
 	})
 	if err != nil {
-		klog.Fatalf("unable to set up overall controller manager: %v", err)
+		klog.Fatalf("unable to set up overall controller manager: %v", err) //设置总控制器管理器失败
 	}
+	//安装证书
 	installCert(webhookManager.GetWebhookServer())
 
-	// Build client to perform kubernetes objects.
+	// Build client to perform kubernetes objects.(构建webhook客户端以执行kubernetes对象。)
 	webhookClient := webhookManager.GetClient()
 
-	// Register webhook APIs
+	// Register webhook APIs(注册webhook API)
 	klog.Info("Registering webhooks for localstorage APIs")
-	webhookManager.GetWebhookServer().Register("/mutate-v1-localstorage", &webhook.Admission{Handler: &localstoragewebhook.LocalstorageMutate{Client: webhookClient}})
-	webhookManager.GetWebhookServer().Register("/validate-v1-localstorage", &webhook.Admission{Handler: &localstoragewebhook.LocalstorageValidator{Client: webhookClient}})
+	//注册webhook API
+	webhookManager.GetWebhookServer().Register("/mutate-v1-localstorage", &webhook.Admission{Handler: &localstoragewebhook.LocalstorageMutate{Client: webhookClient}})      //mutate 用于修改请求
+	webhookManager.GetWebhookServer().Register("/validate-v1-localstorage", &webhook.Admission{Handler: &localstoragewebhook.LocalstorageValidator{Client: webhookClient}}) // validate 用于验证请求
 	go func() {
 		klog.Infof("Starting localstorage webhook server")
 		if err = webhookManager.Start(ctx); err != nil {
 			klog.Fatalf("failed to start localstorage webhook server: %v", err)
 		}
 	}()
-
+	//创建kubernetes Client
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	if err != nil {
 		klog.Fatalf("Failed to build kube clientSet: %v", err)
 	}
 	run := func(ctx context.Context) {
+		//创建了一个新的 localstorage clientSet（通常CRD创建的client称之为clientSet）
 		lsClientSet, err := versioned.NewForConfig(kubeConfig)
 		if err != nil {
 			klog.Fatalf("Failed to new localstorage clientSet: %v", err)
 		}
-
+		//通过informerFactory(工厂)创建了 sharedInformer的实例,
 		sharedInformer := externalversions.NewSharedInformerFactory(lsClientSet, 300*time.Second)
+		//创建了 storageController
 		sc, err := storage.NewStorageController(ctx,
 			sharedInformer.Storage().V1().LocalStorages(),
 			lsClientSet,
@@ -144,15 +151,16 @@ func main() {
 		}
 
 		klog.Infof("Starting localstorage controller")
+		//启动了 storageController
 		go sc.Run(ctx, workers)
-
+		//启动了 sharedInformer监听k8s资源变化
 		sharedInformer.Start(ctx.Done())
-		sharedInformer.WaitForCacheSync(ctx.Done())
+		sharedInformer.WaitForCacheSync(ctx.Done()) //等待缓存同步
 
 		// always wait
 		select {}
 	}
-
+	//如果设置了健康检查端口，就启动一个健康检查服务器
 	if *healthzPort > 0 {
 		mux := http.NewServeMux()
 		healthz.InstallHandler(mux)
@@ -163,7 +171,7 @@ func main() {
 			}
 		}, 5*time.Second, wait.NeverStop)
 	}
-
+	//如果没有设置leader选举，就直接运行
 	if !*leaderElect {
 		run(ctx)
 		klog.Fatalf("unreachable")
@@ -175,7 +183,7 @@ func main() {
 	}
 	// add a uniquifier so that two processes on the same host don't accidentally both become active
 	id = id + "_" + string(uuid.NewUUID())
-
+	//创建了一个新的资源锁
 	rl, err := resourcelock.New(
 		*resourceLock,
 		*resourceNamespace,
@@ -189,26 +197,26 @@ func main() {
 	if err != nil {
 		klog.Fatalf("error creating lock: %v", err)
 	}
-
+	//创建了一个新的leader选举
 	leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
-		Lock:          rl,
-		LeaseDuration: time.Duration(*leaseDuration) * time.Second,
-		RenewDeadline: time.Duration(*renewDeadline) * time.Second,
-		RetryPeriod:   time.Duration(*retryPeriod) * time.Second,
+		Lock:          rl,                                          //资源锁
+		LeaseDuration: time.Duration(*leaseDuration) * time.Second, //租约时间
+		RenewDeadline: time.Duration(*renewDeadline) * time.Second, //续约时间
+		RetryPeriod:   time.Duration(*retryPeriod) * time.Second,   //重试时间
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: run,
-			OnStoppedLeading: func() {
+			OnStartedLeading: run, //如果成为leader，就运行run函数
+			OnStoppedLeading: func() { //如果失去leader，就退出程序
 				klog.Fatalf("leader election lost")
 			},
 		},
 		//WatchDog: electionChecker,
-		Name: "localstorage-manager",
+		Name: "localstorage-manager", //leader选举的名称
 	})
 
-	klog.Fatalf("unreachable")
+	klog.Fatalf("unreachable") //不可达
 }
 
-// install the cert
+// 用于在 Webhook 服务器上安装 TLS 证书和密钥
 func installCert(s *webhook.Server) {
 	s.CertDir = *certDir
 	s.CertName = *certName

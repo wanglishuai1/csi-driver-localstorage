@@ -34,11 +34,14 @@ import (
 	localstoragev1 "github.com/caoyingjunz/csi-driver-localstorage/pkg/apis/localstorage/v1"
 )
 
+// 创建一个LocalstorageValidator结构体，用于验证Localstorage对象
 type LocalstorageValidator struct {
 	Client  client.Client
 	decoder *admission.Decoder
 }
 
+// 实现admission.DecoderInjector接口，用于注入decoder
+// 该接口的作用是将decoder注入到webhook中，以便在Handle函数中使用decoder对请求的对象进行反序列化
 var _ admission.Handler = &LocalstorageValidator{}
 var _ admission.DecoderInjector = &LocalstorageValidator{}
 
@@ -73,6 +76,7 @@ func (v *LocalstorageValidator) Handle(ctx context.Context, req admission.Reques
 	return admission.Allowed("")
 }
 
+// 名称校验
 func (v *LocalstorageValidator) ValidateName(ctx context.Context, ls *localstoragev1.LocalStorage) error {
 	if len(ls.Name) == 0 {
 		return fmt.Errorf("localstorage (%s) name must be than 0 characters", ls.Name)
@@ -84,6 +88,7 @@ func (v *LocalstorageValidator) ValidateName(ctx context.Context, ls *localstora
 	return nil
 }
 
+// 创建校验
 func (v *LocalstorageValidator) ValidateCreate(ctx context.Context, ls *localstoragev1.LocalStorage) error {
 	klog.V(2).Infof("validate create", "name", ls.Name)
 
@@ -97,6 +102,7 @@ func (v *LocalstorageValidator) ValidateCreate(ctx context.Context, ls *localsto
 	return nil
 }
 
+// 更新校验
 func (v *LocalstorageValidator) ValidateUpdate(ctx context.Context, old, cur *localstoragev1.LocalStorage) error {
 	klog.V(2).Infof("validate update", "name", cur.Name)
 
@@ -116,6 +122,7 @@ func (v *LocalstorageValidator) ValidateUpdate(ctx context.Context, old, cur *lo
 	return nil
 }
 
+// 删除校验
 func (v *LocalstorageValidator) ValidateDelete(ctx context.Context, ls *localstoragev1.LocalStorage) error {
 	klog.V(2).Infof("validate delete", "name", ls.Name)
 	return nil
@@ -125,6 +132,12 @@ func (v *LocalstorageValidator) ValidateDelete(ctx context.Context, ls *localsto
 // 1. localstorage node can't be empty
 // 2. localstorage node must be in kubernetes
 // 3. only the one node to binding to
+/*
+   验证localStorage节点
+	1. localStorage节点不能为空
+	2.localStorage节点必须在kubernetes
+	3.只有一个要绑定的节点
+*/
 func (v *LocalstorageValidator) validateLocalStorageNode(ctx context.Context, ls *localstoragev1.LocalStorage) error {
 	if len(ls.Spec.Node) == 0 {
 		return fmt.Errorf("localstraoge (%s) binding node may not be empty", ls.Name)
@@ -150,6 +163,7 @@ func (v *LocalstorageValidator) validateLocalStorageNode(ctx context.Context, ls
 	return nil
 }
 
+// 验证volume组
 func (v *LocalstorageValidator) validateVolumeGroup(ctx context.Context, ls *localstoragev1.LocalStorage) error {
 	if len(ls.Spec.VolumeGroup) == 0 {
 		return fmt.Errorf("spec.volumeGroup may not be empty")
@@ -160,6 +174,10 @@ func (v *LocalstorageValidator) validateVolumeGroup(ctx context.Context, ls *loc
 
 // InjectDecoder implements admission.DecoderInjector interface.
 // A decoder will be automatically injected by InjectDecoderInto.
+/*
+InjectDecoder实现受理. DecoderInjector接口。
+InjectDecoderinto会自动注入一个解码器。
+*/
 func (v *LocalstorageValidator) InjectDecoder(d *admission.Decoder) error {
 	v.decoder = d
 	return nil

@@ -28,9 +28,13 @@ var (
 	shutdownSignals      = []os.Signal{os.Interrupt, syscall.SIGTERM}
 )
 
-// SetupSignalHandler registered for SIGTERM and SIGINT. A context is returned
-// which is cancelled on one of these signals. If a second signal is caught,
-// the program is terminated with exit code 1.
+/*
+为SIGTERM和SIGINT注册的SetupSignalHandler。
+返回一个上下文，该上下文在其中一个信号上被取消。
+如果捕获到第二个信号，程序将以退出代码1终止。
+允许你设置一个信号处理程序来处理操作系统发出的终止信号（如Ctrl+C 或者 SIGTERM）。
+当接收到这些信号时，它会取消返回的context，这允许正在运行的go程序可以优雅地结束它们的工作
+*/
 func SetupSignalHandler() context.Context {
 	close(onlyOneSignalHandler) // panics when called twice
 

@@ -25,8 +25,14 @@ const (
 	LsProtectionFinalizer = "caoyingjunz.io/ls-protection"
 )
 
+// 终结器的Util
+
 // AddFinalizer accepts an Object and adds the provided finalizer if not present.
 // It returns an indication of whether it updated the object's list of finalizers.
+/*
+	AddFinalizer接受一个Object并添加提供的终结器（如果不存在）。
+	它返回是否更新了对象的终结器列表的指示。
+*/
 func AddFinalizer(o *localstoragev1.LocalStorage, finalizer string) (finalizersUpdated bool) {
 	f := o.GetFinalizers()
 	for _, e := range f {
@@ -40,6 +46,10 @@ func AddFinalizer(o *localstoragev1.LocalStorage, finalizer string) (finalizersU
 
 // RemoveFinalizer accepts an Object and removes the provided finalizer if present.
 // It returns an indication of whether it updated the object's list of finalizers.
+/*
+	RemoveFinalizer接受一个Object并删除提供的终结器（如果存在）。
+	它返回是否更新了对象的终结器列表的指示。
+*/
 func RemoveFinalizer(o *localstoragev1.LocalStorage, finalizer string) (finalizersUpdated bool) {
 	f := o.GetFinalizers()
 	for i := 0; i < len(f); i++ {
@@ -54,6 +64,7 @@ func RemoveFinalizer(o *localstoragev1.LocalStorage, finalizer string) (finalize
 }
 
 // ContainsFinalizer checks an Object that the provided finalizer is present.
+// ContainsFinalizer检查提供的终结器存在的对象。
 func ContainsFinalizer(o *localstoragev1.LocalStorage, finalizer string) bool {
 	f := o.GetFinalizers()
 	for _, e := range f {

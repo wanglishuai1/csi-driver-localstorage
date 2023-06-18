@@ -28,6 +28,9 @@ var (
 	scheme = runtime.NewScheme()
 )
 
+// Scheme用于将Go结构映射到组，版本和种类的字符串，这是反序列化API对象所必需的
+// 定义了一个全局的scheme，并在init函数中注册了两种API资源对象的类型：
+// 标准的Kubernetes对象（如Pods, Services等）和本地存储的API对象
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(localstoragev1.AddToScheme(scheme))

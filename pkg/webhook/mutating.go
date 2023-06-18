@@ -42,21 +42,26 @@ type SetFunc func(ls *localstoragev1.LocalStorage, op admissionv1.Operation)
 
 func (s *LocalstorageMutate) Handle(ctx context.Context, req admission.Request) admission.Response {
 	ls := &localstoragev1.LocalStorage{}
-	if err := s.decoder.Decode(req, ls); err != nil {
+	if err := s.decoder.Decode(req, ls); err != nil { // 将请求的对象反序列化
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	klog.Infof("Mutating localstorage %s for %s", ls.Name, req.Operation)
 
-	// add finalizer into localstorage if necessary
+	// add finalizer into localstorage if necessary(如有必要，将终结器添加到本地存储中)
+	/**
+	如果LocalStorage对象的删除时间戳为空，就给它添加一个终结器。
+	这意味着，只有在对象被创建或更新时，才会添加终结器，而不是在删除操作中
+	*/
 	if ls.DeletionTimestamp.IsZero() {
 		s.SetFinalizer(ls)
 	}
 
 	// set localstorage default values
+	// 设置LocalStorage对象的默认值
 	s.Default(ls, req.Operation, s.SetStatus, s.SetDisks, s.SetVolumes)
 
 	// PatchResponseFromRaw
-	data, err := json.Marshal(ls)
+	data, err := json.Marshal(ls) //编码为
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
@@ -109,7 +114,12 @@ func (s *LocalstorageMutate) SetVolumes(ls *localstoragev1.LocalStorage, op admi
 }
 
 // SetFinalizer add finalizer if necessary
+/*
+ 	设置终结器（finalizer）如果有必要
+	通常用于在删除对象之前清理或释放一些相关资源，如网络端点、磁盘卷等
+*/
 func (s *LocalstorageMutate) SetFinalizer(ls *localstoragev1.LocalStorage) {
+	//首先检查是否包含终结器，如果没有，则添加终结器
 	if !util.ContainsFinalizer(ls, util.LsProtectionFinalizer) {
 		util.AddFinalizer(ls, util.LsProtectionFinalizer)
 	}
@@ -117,6 +127,10 @@ func (s *LocalstorageMutate) SetFinalizer(ls *localstoragev1.LocalStorage) {
 
 // InjectDecoder implements admission.DecoderInjector interface.
 // A decoder will be automatically injected by InjectDecoderInto.
+/*
+InjectDecoder实现受理. DecoderInjector接口。
+InjectDecoderinto会自动注入一个解码器。
+*/
 func (s *LocalstorageMutate) InjectDecoder(d *admission.Decoder) error {
 	s.decoder = d
 	return nil

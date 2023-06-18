@@ -46,8 +46,9 @@ var (
 	pprofPort   = flag.String("pprof-port", "6060", "The port of pprof to listen on")
 )
 
+// 将日志输出设置为标准错误输出。
 func init() {
-	_ = flag.Set("logtostderr", "true")
+	_ = flag.Set("logtostderr", "true") //设置日志输出到标准错误输出
 }
 
 var (
@@ -55,9 +56,10 @@ var (
 )
 
 func main() {
+	//命令行参数解析
 	klog.InitFlags(nil)
 	flag.Parse()
-
+	//初始化localstorage配置
 	cfg := localstorage.Config{
 		DriverName:    *driverName,
 		Endpoint:      *endpoint,
@@ -65,12 +67,14 @@ func main() {
 		NodeId:        *nodeId,
 		VolumeDir:     *volumeDir,
 	}
+	//如果没有指定nodeid，则从环境变量中获取
 	if len(cfg.NodeId) == 0 {
 		klog.V(2).Infof("Get node name from env")
 		cfg.NodeId = os.Getenv("NODE_NAME")
 	}
 
 	// Start pprof and gain leadership before executing the main loop
+	//如果开启了pprof，则启动pprof服务
 	if *enablePprof {
 		go func() {
 			klog.Infof("Starting the pprof server on: %s", *pprofPort)
@@ -79,23 +83,24 @@ func main() {
 			}
 		}()
 	}
-
-	// set up signals so we handle the shutdown signal gracefully
+	//设置一个可以优雅处理系统中断信号的上下文。这样在系统中断信号到来时，可以优雅的停止程序。
 	ctx := signals.SetupSignalHandler()
-
+	//创建一个kubernetes客户端配置(传入配置文件路径)
 	kubeConfig, err := util.BuildClientConfig(*kubeconfig)
 	if err != nil {
 		klog.Fatalf("Failed to build kube config: %v", err)
 	}
+	//设置kubernetes客户端配置的qps和burst,分别为每秒最大请求数和突发请求数，这里设置为30000
 	kubeConfig.QPS = 30000
 	kubeConfig.Burst = 30000
-
+	//创建kubernetes客户端
 	kubeClient, lsClientSet, err := util.NewClientSets(kubeConfig)
 	if err != nil {
 		klog.Fatal("failed to build clientSets: %v", err)
 	}
-
+	//创建一个sharedInformer工厂，用于创建sharedInformer
 	sharedInformer := externalversions.NewSharedInformerFactory(lsClientSet, 300*time.Second)
+	//创建一个localstorage driver
 	driver, err := localstorage.NewLocalStorage(ctx, cfg,
 		sharedInformer.Storage().V1().LocalStorages(),
 		lsClientSet,
@@ -104,16 +109,16 @@ func main() {
 	if err != nil {
 		klog.Fatalf("Failed to initialize localstorage driver :%v", err)
 	}
-
+	//启动localstorage driver
 	go func() {
 		klog.Infof("Starting localstorage driver")
 		if err = driver.Run(ctx); err != nil {
 			klog.Fatalf("Failed to run localstorage driver :%v", err)
 		}
 	}()
-
+	//启动sharedInformer
 	sharedInformer.Start(ctx.Done())
-	sharedInformer.WaitForCacheSync(ctx.Done())
-
+	sharedInformer.WaitForCacheSync(ctx.Done()) //等待缓存同步
+	//程序会一直运行，直到接收到系统中断信号。
 	<-ctx.Done()
 }
