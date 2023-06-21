@@ -41,6 +41,7 @@ import (
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/runtime"
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/signals"
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/util"
+	storageutil "github.com/caoyingjunz/csi-driver-localstorage/pkg/util/storage"
 	localstoragewebhook "github.com/caoyingjunz/csi-driver-localstorage/pkg/webhook"
 )
 
@@ -60,6 +61,8 @@ var (
 	kubeconfig   = flag.String("kubeconfig", "", "paths to a kubeconfig. Only required if out-of-cluster.")
 	kubeAPIQPS   = flag.Int("kube-api-qps", 5, "QPS to use while communicating with the kubernetes apiserver. Defaults to 5")
 	kubeAPIBurst = flag.Int("kube-api-burst", 10, "Burst to use while communicating with the kubernetes apiserver. Defaults to 10.")
+
+	createLocalstorage = flag.Bool("create-localstorage", true, "Create localstorage object if not present")
 
 	// webhook flags
 	host     = flag.String("host", "", "host is the ip address that the webhook server binds to")
@@ -138,6 +141,14 @@ func main() {
 		if err != nil {
 			klog.Fatalf("Failed to new localstorage clientSet: %v", err)
 		}
+		//创建了一个新的 localstorage clientSet（通常CRD创建的client称之为clientSet）
+		if *createLocalstorage {
+			klog.Infof("Creating localstorage cr when controller manager started")
+			if err = storageutil.CreateLocalStorage(kubeClient, lsClientSet); err != nil {
+				klog.Fatalf("Failed to create/init localstorage cr: %v", err)
+			}
+		}
+
 		//通过informerFactory(工厂)创建了 sharedInformer的实例,
 		sharedInformer := externalversions.NewSharedInformerFactory(lsClientSet, 300*time.Second)
 		//创建了 storageController

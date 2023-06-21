@@ -10,4 +10,6 @@ provisioner: localstorage.csi.caoyingjunz.io # 指定 CSI 驱动名称
 reclaimPolicy: Delete # 指定回收策略
 volumeBindingMode: WaitForFirstConsumer # 指定绑定模式
 
+  # WaitForFirstConsumer（就是告诉 Kubernetes 里的 Volume 控制循环（“红娘”）：虽然你已经发现这个 StorageClass 关联的 PVC 与 PV 可以绑定在一起，但请不要现在就执行绑定操作（即：设置 PVC 的 VolumeName 字段）。而要等到第一个声明使用该 PVC 的 Pod 出现在调度器之后，调度器再综合考虑所有的调度规则，当然也包括每个 PV 所在的节点位置，来统一决定，这个 Pod 声明的 PVC，到底应该跟哪个 PV 进行绑定。）
+
 # 总结：CSI 驱动的创建，需要创建 CSIDriver 和 StorageClass 两个资源，其中 CSIDriver 用于指定 CSI 驱动的名称，StorageClass 用于指定 CSI 驱动的名称、挂载选项、参数、回收策略和绑定模式等。
