@@ -21,8 +21,8 @@ spec:
             - --healthz-port=10258
             - --cert-dir=/tmp/cert
             - --port=8443
-          image: harbor.powerlaw.club/pixiuio/localstorage-controller:latest
-          imagePullPolicy: Always
+          image: pixiuio/localstorage-controller:v1.0.1
+          imagePullPolicy: IfNotPresent
           name: ls-controller
           volumeMounts:
             - mountPath: /tmp/cert
