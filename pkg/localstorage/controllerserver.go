@@ -17,9 +17,6 @@ limitations under the License.
 package localstorage
 
 import (
-	"os"
-	"path/filepath"
-
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/google/uuid"
 	"golang.org/x/net/context"
@@ -61,28 +58,23 @@ func (ls *localStorage) CreateVolume(ctx context.Context, req *csi.CreateVolumeR
 	if err != nil {
 		return nil, err
 	}
-	//生成volume的ID
-	volumeID := uuid.New().String()
-
-	// TODO: 临时实现，后续修改
-	//format一下路径 volumeDir + / + volumeID
-	path := ls.parseVolumePath(volumeID)
-	//创建目录
-	if err := os.MkdirAll(path, 0750); err != nil {
-		return nil, err
-	}
-
 	// Deep-copy otherwise we are mutating our cache.
 	// TODO: Deep-copy only when needed.
 	//深度拷贝数据到s
 	s := localstorage.DeepCopy()
-	//获取 PVC 请求的存储空间大小
+
+	volumeID := uuid.New().String()
+	volPath := parseVolumePath(ls.config.VolumeDir, volumeID)
+	if err = storageutil.CreateVolumeDir(volPath); err != nil {
+		return nil, err
+	}
+
 	volSize := req.GetCapacityRange().GetRequiredBytes()
 	//把volume添加到localstorage的volumes中
 	util.AddVolume(s, localstoragev1.Volume{
 		VolID:   volumeID,
 		VolName: name,
-		VolPath: path,
+		VolPath: volPath,
 		VolSize: volSize,
 	})
 	//计算可用空间（传入当前s的可用空间、新的volume）
@@ -97,7 +89,7 @@ func (ls *localStorage) CreateVolume(ctx context.Context, req *csi.CreateVolumeR
 	if volumeContext == nil {
 		volumeContext = make(map[string]string)
 	}
-	volumeContext["localPath.caoyingjunz.io"] = path
+	volumeContext["localPath.caoyingjunz.io"] = volPath
 
 	klog.Infof("pvc %v volume %v successfully deleted", name, volumeID)
 	return &csi.CreateVolumeResponse{
@@ -125,13 +117,13 @@ func (ls *localStorage) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeR
 	if err != nil {
 		return nil, err
 	}
-	//获取volumeID
-	volId := req.GetVolumeId()
 
 	// Deep-copy otherwise we are mutating our cache.
 	// TODO: Deep-copy only when needed.
 	s := localstorage.DeepCopy()
-	//删除volume
+
+	volId := req.GetVolumeId()
+
 	vol := util.RemoveVolume(s, volId)
 	//重新计算可用空间（删除之后，可用空间增加，所以是add）
 	s.Status.Allocatable = ls.calculateAllocatedSize(s.Status.Allocatable, vol.VolSize, AddOperation)
@@ -140,9 +132,8 @@ func (ls *localStorage) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeR
 	if _, err = ls.client.StorageV1().LocalStorages().Update(ctx, s, metav1.UpdateOptions{}); err != nil {
 		return nil, err
 	}
-	//删除目录
-	// TODO: 临时处理
-	if err := os.RemoveAll(ls.parseVolumePath(volId)); err != nil && !os.IsNotExist(err) {
+	volPath := parseVolumePath(ls.config.VolumeDir, volId)
+	if err = storageutil.DeleteVolumeDir(volPath); err != nil {
 		return nil, err
 	}
 	klog.Infof("volume %v successfully deleted", volId)
@@ -164,13 +155,6 @@ func (ls *localStorage) calculateAllocatedSize(allocatableSize *resource.Quantit
 	return allocatableSize
 }
 
-// parseVolumePath returns the canonical path for volume(返回卷的规范路径)
-
-func (ls *localStorage) parseVolumePath(volID string) string {
-	return filepath.Join(ls.config.VolumeDir, volID)
-}
-
-// 暂时没用
 func (ls *localStorage) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
@@ -198,26 +182,21 @@ func (ls *localStorage) ListVolumes(ctx context.Context, req *csi.ListVolumesReq
 	//上锁
 	ls.lock.Lock()
 	defer ls.lock.Unlock()
-	//遍历cache中的所有的volume
-	for _, vol := range ls.cache.GetVolumes() {
-		volumes.Entries = append(volumes.Entries, &csi.ListVolumesResponse_Entry{
-			//volume信息(容量，id)
-			Volume: &csi.Volume{
-				VolumeId:      vol.VolID,
-				CapacityBytes: vol.VolSize,
-			},
-			//volume状态（是一个可选字段，提供了这个卷当前的状态，例如是否被控制插件发布）
-			Status: &csi.ListVolumesResponse_VolumeStatus{
-				PublishedNodeIds: []string{vol.NodeID},
-				VolumeCondition:  &csi.VolumeCondition{},
-			},
-		})
-	}
-	/*
-		这样子当我们需要获取存储系统中所有卷的信息时，可以调用 ListVolumes RPC，
-		并通过查看返回的 ListVolumesResponse 中的 ListVolumesResponse_Entry
-		来获得每个卷的详细信息
-	*/
+
+	// TODO: 后续实现
+	// for _, vol := range ls.cache.GetVolumes() {
+	// 	volumes.Entries = append(volumes.Entries, &csi.ListVolumesResponse_Entry{
+	// 		Volume: &csi.Volume{
+	// 			VolumeId:      vol.VolID,
+	// 			CapacityBytes: vol.VolSize,
+	// 		},
+	// 		Status: &csi.ListVolumesResponse_VolumeStatus{
+	// 			PublishedNodeIds: []string{vol.NodeID},
+	// 			VolumeCondition:  &csi.VolumeCondition{},
+	// 		},
+	// 	})
+	// }
+
 	klog.Infof("Localstorage volumes are: %+v", volumes)
 	return volumes, nil
 }

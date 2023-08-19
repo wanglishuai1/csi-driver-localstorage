@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+
 	// import pprof for performance diagnosed
 	_ "net/http/pprof"
 
@@ -36,10 +37,11 @@ var (
 	endpoint   = flag.String("endpoint", "unix://tmp/csi.sock", "CSI endpoint")
 	driverName = flag.String("drivername", localstorage.DefaultDriverName, "name of the driver")
 	nodeId     = flag.String("nodeid", "", "node id")
-	// Deprecated： 临时使用，后续删除
-	volumeDir = flag.String("volume-dir", "/tmp", "directory for storing state information across driver volumes")
+	volumeDir  = flag.String("volume-dir", "/tmp", "directory for storing state information across driver volumes")
 
-	kubeconfig = flag.String("kubeconfig", "", "paths to a kubeconfig. Only required if out-of-cluster.")
+	kubeconfig   = flag.String("kubeconfig", "", "paths to a kubeconfig. Only required if out-of-cluster.")
+	kubeAPIQPS   = flag.Int("kube-api-qps", 5, "QPS to use while communicating with the kubernetes apiserver. Defaults to 5")
+	kubeAPIBurst = flag.Int("kube-api-burst", 10, "Burst to use while communicating with the kubernetes apiserver. Defaults to 10.")
 
 	// pprof flags
 	enablePprof = flag.Bool("enable-pprof", false, "Start pprof and gain leadership before executing the main loop")
@@ -90,10 +92,8 @@ func main() {
 	if err != nil {
 		klog.Fatalf("Failed to build kube config: %v", err)
 	}
-	//设置kubernetes客户端配置的qps和burst,分别为每秒最大请求数和突发请求数，这里设置为30000
-	kubeConfig.QPS = 30000
-	kubeConfig.Burst = 30000
-	//创建kubernetes客户端
+	kubeConfig.QPS = float32(*kubeAPIQPS)
+	kubeConfig.Burst = *kubeAPIBurst
 	kubeClient, lsClientSet, err := util.NewClientSets(kubeConfig)
 	if err != nil {
 		klog.Fatal("failed to build clientSets: %v", err)

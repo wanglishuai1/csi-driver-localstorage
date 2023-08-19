@@ -19,14 +19,12 @@ package localstorage
 import (
 	"context"
 	"fmt"
-	"path"
 	"sync"
 	"time"
 
 	v1core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -35,7 +33,6 @@ import (
 	"k8s.io/klog/v2"
 
 	localstoragev1 "github.com/caoyingjunz/csi-driver-localstorage/pkg/apis/localstorage/v1"
-	"github.com/caoyingjunz/csi-driver-localstorage/pkg/cache"
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/client/clientset/versioned"
 	v1 "github.com/caoyingjunz/csi-driver-localstorage/pkg/client/informers/externalversions/localstorage/v1"
 	localstorage "github.com/caoyingjunz/csi-driver-localstorage/pkg/client/listers/localstorage/v1"
@@ -45,15 +42,14 @@ import (
 
 const (
 	DefaultDriverName = "localstorage.csi.caoyingjunz.io"
-	StoreFile         = "localstorage.json"
 
-	annNodeSize = "volume.caoyingjunz.io/node-size"
-	maxRetries  = 15
+	annNodeSize     = "volume.caoyingjunz.io/node-size"
+	defaultPathSize = "500Gi"
+	maxRetries      = 15
 )
 
 type localStorage struct {
-	config Config      // 配置信息
-	cache  cache.Cache // 数据缓存
+	config Config
 
 	lock sync.Mutex // 互斥锁
 
@@ -67,12 +63,11 @@ type localStorage struct {
 }
 
 type Config struct {
-	DriverName    string // 驱动名称
-	Endpoint      string // CSI端点
-	VendorVersion string // 驱动版本
-	NodeId        string // 节点ID
-	// Deprecated: 临时使用，后续删除
-	VolumeDir string // 本地存储的目录
+	DriverName    string
+	Endpoint      string
+	VendorVersion string
+	NodeId        string
+	VolumeDir     string
 }
 
 // NewLocalStorage 创建本地存储
@@ -84,27 +79,12 @@ func NewLocalStorage(ctx context.Context, cfg Config, lsInformer v1.LocalStorage
 		return nil, fmt.Errorf("no node id provided")
 	}
 	klog.V(2).Infof("Driver: %v version: %v, nodeId: %v", cfg.DriverName, cfg.VendorVersion, cfg.NodeId)
-	// 创建本地存储的目录
-	if err := makeVolumeDir(cfg.VolumeDir); err != nil {
-		return nil, err
-	}
-	storeFile := path.Join(cfg.VolumeDir, StoreFile)
-	klog.V(2).Infof("localstorage will be store in %s", storeFile)
-	// 创建缓存
-	s, err := cache.New(storeFile)
-	if err != nil {
-		return nil, err
-	}
-	// 创建localstorage
-	ls, err := &localStorage{
+
+	ls := &localStorage{
 		config:     cfg,
-		cache:      s,
 		kubeClient: kubeClientSet,
 		client:     lsClientSet,
 		queue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "plugin"), // 创建带有速率的任务队列，且使用默认的速率限制器，名称为plugin
-	}, nil
-	if err != nil {
-		return nil, err
 	}
 	// 添加事件处理函数
 	lsInformer.Informer().AddEventHandler(kubecache.FilteringResourceEventHandler{
@@ -203,21 +183,50 @@ func (ls *localStorage) sync(ctx context.Context, dKey string) error {
 	// Deep copy otherwise we are mutating the cache.
 	//通过 DeepCopy 方法，我们可以创建一个对象的深拷贝，这样就不会影响到缓存中的对象
 	l := localstorage.DeepCopy()
-	nodeSize, ok := l.Annotations[annNodeSize] // 获取node size
-	if !ok {
-		return fmt.Errorf("failed to found node localstorage size")
-	}
-	klog.Infof("get node size %s from annotations", nodeSize)
-	quantity, err := resource.ParseQuantity(nodeSize) // 转化为resource.Quantity对象
-	if err != nil {
-		return fmt.Errorf("failed to parse node quantity: %v", err)
+
+	// Set localstorage status to Init
+	if util.LocalStorageIsPending(l) {
+		return storageutil.UpdateLocalStoragePhase(ls.client, l, localstoragev1.LocalStorageInitiating)
 	}
 
-	l.Status.Capacity = &quantity                     // 设置localstorage的容量
-	l.Status.Allocatable = &quantity                  // 设置localstorage的可用容量
-	l.Status.Phase = localstoragev1.LocalStorageReady // 设置localstorage的状态为ready，然后更新localstorage
-	_, err = ls.client.StorageV1().LocalStorages().Update(ctx, l, metav1.UpdateOptions{})
-	return err
+	if l.Spec.Path == nil && l.Spec.Lvm == nil {
+		klog.Infof("Waiting for localstorage backend setup")
+		return nil
+	}
+	if l.Spec.Path != nil && l.Spec.Lvm != nil {
+		// never happen
+		return fmt.Errorf("spec.path and spec.lvm can only be used at most one")
+	}
+
+	var quantity resource.Quantity
+	// handle hostPath backend
+	if l.Spec.Path != nil {
+		nodeSize, ok := l.Annotations[annNodeSize]
+		if !ok {
+			nodeSize = defaultPathSize
+		}
+		klog.Infof("get node size %s from annotations or default", nodeSize)
+		quantity, err = resource.ParseQuantity(nodeSize)
+		if err != nil {
+			return fmt.Errorf("failed to parse node quantity: %v", err)
+		}
+
+		// setup volume base dir
+		if err = makeVolumeDir(l.Spec.Path.VolumeDir); err != nil {
+			klog.Errorf("failed to create volume path: %v", l.Spec.Path.VolumeDir)
+			return err
+		}
+	}
+	// handle lvm backend
+	if l.Spec.Lvm != nil {
+		// TODO
+		klog.Warningf("unsupported localstorage backend: lvm")
+		return nil
+	}
+
+	l.Status.Capacity = &quantity
+	l.Status.Allocatable = &quantity
+	return storageutil.UpdateLocalStoragePhase(ls.client, l, localstoragev1.LocalStorageReady)
 }
 
 // 更新localstorage到队列
@@ -303,25 +312,4 @@ func (ls *localStorage) enqueue(s *localstoragev1.LocalStorage) {
 // 获取node
 func (ls *localStorage) GetNode() string {
 	return ls.config.NodeId
-}
-
-func (ls *localStorage) TryUpdateNode() error {
-	nodeClient := ls.kubeClient.CoreV1().Nodes()
-	originalNode, err := nodeClient.Get(context.TODO(), ls.GetNode(), metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	node := originalNode.DeepCopy()
-	if storageutil.IsNodeIDInNode(node) {
-		return nil
-	}
-
-	node = storageutil.UpdateNodeIDInNode(node, ls.GetNode())
-	_, err = nodeClient.Update(context.TODO(), node, metav1.UpdateOptions{})
-
-	// TODO: optimised by patch
-	//patchBytes := []byte("ddd")
-	//updatedNode, err := nodeClient.Patch(context.TODO(), ls.GetNode(), types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}, "status")
-	return err
 }

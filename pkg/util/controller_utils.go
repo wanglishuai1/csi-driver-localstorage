@@ -27,13 +27,32 @@ func AssignedLocalstorage(ls *localstoragev1.LocalStorage, nodeId string) bool {
 	if ls.Spec.Node != nodeId {
 		return false
 	}
-	//如果 localStorage 对象的状态为 "Pending" 或 "Maintaining"，则返回 true
-	return IsPendingStatus(ls) || ls.Status.Phase == localstoragev1.LocalStorageMaintaining
+	return LocalStorageIsInitiating(ls) || LocalStorageIsPending(ls)
 }
 
-// 判断当前ls是否是pending状态
-func IsPendingStatus(ls *localstoragev1.LocalStorage) bool {
-	return ls.Status.Phase == localstoragev1.LocalStoragePending
+func LocalStorageIsPending(ls *localstoragev1.LocalStorage) bool {
+	return CheckLocalStoragePhase(ls.Status.Phase, localstoragev1.LocalStoragePending)
+}
+
+func LocalStorageIsInitiating(ls *localstoragev1.LocalStorage) bool {
+	return CheckLocalStoragePhase(ls.Status.Phase, localstoragev1.LocalStorageInitiating)
+}
+
+func LocalStorageIsReady(ls *localstoragev1.LocalStorage) bool {
+	return CheckLocalStoragePhase(ls.Status.Phase, localstoragev1.LocalStorageReady)
+}
+
+func LocalStorageIsTerminating(ls *localstoragev1.LocalStorage) bool {
+	return CheckLocalStoragePhase(ls.Status.Phase, localstoragev1.LocalStorageTerminating)
+}
+
+func SetLocalStoragePhase(ls *localstoragev1.LocalStorage, phase localstoragev1.LocalStoragePhase) {
+	ls.Status.Phase = phase
+}
+
+// CheckLocalStoragePhase 检查两个状态是否相同
+func CheckLocalStoragePhase(p1, p2 localstoragev1.LocalStoragePhase) bool {
+	return p1 == p2
 }
 
 // AddVolume accepts a volume and adds the provided volume if not present.

@@ -107,10 +107,9 @@ spec:
             allowPrivilegeEscalation: true
           image: harbor.powerlaw.club/pixiuio/localstorageplugin:latest
           args:
-            - --endpoint=$(CSI_ENDPOINT)
-            - --volume-dir=/data
-            - --create-localstorage
-            - -v=5
+            - "-v=5"
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--volume-dir=/data"
           env:
             - name: NODE_NAME
               valueFrom:

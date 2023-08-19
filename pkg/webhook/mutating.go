@@ -89,22 +89,7 @@ func (s *LocalstorageMutate) SetStatus(ls *localstoragev1.LocalStorage, op admis
 
 // SetDisks 在创建LocalStorage对象时，对其磁盘列表进行清理，只保留那些有名称的磁盘，且只保留磁盘的名称，其他磁盘的信息都被忽略
 func (s *LocalstorageMutate) SetDisks(ls *localstoragev1.LocalStorage, op admissionv1.Operation) {
-	if op == admissionv1.Create {
-		disks := ls.Spec.Disks
-		if disks == nil {
-			return
-		}
-
-		var newDisk []localstoragev1.DiskSpec
-		for _, disk := range disks {
-			if len(disk.Name) == 0 {
-				continue
-			}
-			newDisk = append(newDisk, localstoragev1.DiskSpec{Name: disk.Name})
-		}
-
-		ls.Spec.Disks = newDisk
-	}
+	// TODO:
 }
 
 // SetVolumes 在创建时将Volumes置为nil

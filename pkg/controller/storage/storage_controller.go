@@ -23,7 +23,6 @@ import (
 
 	v1core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -36,9 +35,10 @@ import (
 
 	localstoragev1 "github.com/caoyingjunz/csi-driver-localstorage/pkg/apis/localstorage/v1"
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/client/clientset/versioned"
-	"github.com/caoyingjunz/csi-driver-localstorage/pkg/client/informers/externalversions/localstorage/v1"
+	v1 "github.com/caoyingjunz/csi-driver-localstorage/pkg/client/informers/externalversions/localstorage/v1"
 	localstorage "github.com/caoyingjunz/csi-driver-localstorage/pkg/client/listers/localstorage/v1"
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/util"
+	storageutil "github.com/caoyingjunz/csi-driver-localstorage/pkg/util/storage"
 )
 
 const (
@@ -115,14 +115,15 @@ func (s *StorageController) addStorage(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("expected localstorage in addStorage, but got %#v", obj))
 		return
 	}
-	klog.V(2).Info("Adding localstorage", "localstorage", klog.KObj(ls))
+
+	klog.V(2).Info("Adding localstorage", klog.KObj(ls))
 	s.enqueueLocalstorage(ls) // 将 LocalStorage 对象放入工作队列中
 }
 
 func (s *StorageController) updateStorage(old, cur interface{}) {
 	oldLs := old.(*localstoragev1.LocalStorage)
 	curLs := cur.(*localstoragev1.LocalStorage)
-	klog.V(2).Info("Updating localstorage", "localstorage", klog.KObj(oldLs))
+	klog.V(2).Info("Updating localstorage", klog.KObj(oldLs))
 
 	s.enqueueLocalstorage(curLs) // 将 LocalStorage 对象放入工作队列中
 }
@@ -150,25 +151,11 @@ func (s *StorageController) deleteStorage(obj interface{}) {
 	s.enqueueLocalstorage(ls) // 将 LocalStorage 对象放入工作队列中
 }
 
-// 更新传入的localstorage类型对象ls
-func (s *StorageController) onlyUpdate(ctx context.Context, ls *localstoragev1.LocalStorage) error {
-	_, err := s.client.StorageV1().LocalStorages().Update(ctx, ls, metav1.UpdateOptions{})
-	if err != nil {
-		klog.Errorf("Failed to update localstorage %s: %v", ls, err)
-		return err
-	}
-
-	return nil
-}
-
-// 它主要同步或更新存储状态
-// 这个函数处理 LocalStorage 对象的同步、初始化和删除过程，确保其状态与 Kubernetes 中的实际状态保持一致
 func (s *StorageController) syncStorage(ctx context.Context, dKey string) error {
 	startTime := time.Now()
-	//记录耗时
-	klog.V(2).InfoS("Started syncing localstorage manager", "localstorage", "startTime", startTime)
+	klog.V(2).InfoS("Started syncing localstorage manager", "startTime", startTime)
 	defer func() {
-		klog.V(2).InfoS("Finished syncing localstorage manager", "localstorage", "duration", time.Since(startTime))
+		klog.V(2).InfoS("Finished syncing localstorage manager", "duration", time.Since(startTime))
 	}()
 	// 从列表中获取localstorage对象
 	localstorage, err := s.lsLister.Get(dKey)
@@ -182,24 +169,19 @@ func (s *StorageController) syncStorage(ctx context.Context, dKey string) error 
 	// Deep copy otherwise we are mutating the cache.(深度复制,防止修改缓存)
 	ls := localstorage.DeepCopy()
 
-	// Handler deletion event（处理删除事件）
-	if !ls.DeletionTimestamp.IsZero() { //如果这个字段非零，说明该对象正在被删除
-		// TODO: to delete some external localstorage object
-		if ls.Status.Phase != localstoragev1.LocalStorageTerminating { //如果状态不是正在删除
-			ls.Status.Phase = localstoragev1.LocalStorageTerminating //设置状态为LocalStorageTerminating
-			//k8s中更新 LocalStorage 对象
-			if _, err = s.client.StorageV1().LocalStorages().Update(ctx, ls, metav1.UpdateOptions{}); err != nil {
-				return err
-			}
+	// Handler deletion event
+	if !ls.DeletionTimestamp.IsZero() {
+		if !util.LocalStorageIsTerminating(ls) {
+			util.SetLocalStoragePhase(ls, localstoragev1.LocalStorageTerminating)
+			return storageutil.TryUpdateLocalStorage(s.client, ls)
 		}
 		return nil
 	}
-	//如果对象没有被删除，那么就判断对象的状态是否为Pending，如果是，那么就将状态设置为LocalStorageInitiating，然后更新到k8s中
-	// TODO: handler somethings
-	if util.IsPendingStatus(ls) {
-		ls.Status.Phase = localstoragev1.LocalStorageInitiating
-		//k8s中更新 LocalStorage 对象
-		if _, err = s.client.StorageV1().LocalStorages().Update(ctx, ls, metav1.UpdateOptions{}); err != nil {
+
+	// Handler initialize Phase
+	if util.LocalStorageIsPending(ls) {
+		util.SetLocalStoragePhase(ls, localstoragev1.LocalStorageInitiating)
+		if err = storageutil.TryUpdateLocalStorage(s.client, ls); err != nil {
 			return err
 		}
 		s.eventRecorder.Eventf(ls, v1core.EventTypeNormal, "initialize", fmt.Sprintf("waiting for plugin to initialize %s localstorage", ls.Name))

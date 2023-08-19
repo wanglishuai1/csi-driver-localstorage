@@ -17,13 +17,16 @@ limitations under the License.
 package util
 
 import (
+	"fmt"
 	"path/filepath"
+	"time"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
@@ -71,6 +74,15 @@ func NewClientSets(kubeConfig *restclient.Config) (kubernetes.Interface, version
 	return kubeClient, lsClientSet, nil
 }
 
+func NewClientSetsFromConfig(configFile string) (kubernetes.Interface, versioned.Interface, error) {
+	kubeConfig, err := BuildClientConfig(configFile)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return NewClientSets(kubeConfig)
+}
+
 func CreateRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
@@ -83,4 +95,25 @@ func CreateRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
 func BytesToQuantity(bytes int64) resource.Quantity {
 	quantity := resource.NewQuantity(bytes, resource.BinarySI)
 	return *quantity
+}
+
+func WaitUntilPersistentVolumeClaimIsCreated(pvcLister corelisters.PersistentVolumeClaimLister, namespace, name string, timeout time.Duration) (*v1.PersistentVolumeClaim, error) {
+	// Wait until pvc is created
+	pvc, err := pvcLister.PersistentVolumeClaims(namespace).Get(name)
+	if err == nil {
+		klog.V(2).Infof("waited for pvc %s/%s to be created", namespace, name)
+		return pvc, nil
+	}
+
+	pollingPeriod := 200 * time.Millisecond
+	startTime := time.Now()
+	for startTime.Add(timeout).After(time.Now()) {
+		time.Sleep(pollingPeriod)
+		pvc, err := pvcLister.PersistentVolumeClaims(namespace).Get(name)
+		if err == nil {
+			klog.V(2).Infof("waited for pvc %s/%s to be created when retry", namespace, name)
+			return pvc, nil
+		}
+	}
+	return nil, fmt.Errorf("timed out after %v when waiting for pvc %v/%v to created", timeout, namespace, name)
 }

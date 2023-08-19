@@ -19,16 +19,26 @@ package storage
 import (
 	"context"
 	"fmt"
+	"os"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/util/sets"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	storagelisters "k8s.io/client-go/listers/storage/v1"
+	"k8s.io/klog/v2"
 
 	localstoragev1 "github.com/caoyingjunz/csi-driver-localstorage/pkg/apis/localstorage/v1"
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/client/clientset/versioned"
 	localstorage "github.com/caoyingjunz/csi-driver-localstorage/pkg/client/listers/localstorage/v1"
 	"github.com/caoyingjunz/csi-driver-localstorage/pkg/types"
+	"github.com/caoyingjunz/csi-driver-localstorage/pkg/util"
+)
+
+const (
+	DefaultDriverName = "localstorage.csi.caoyingjunz.io"
 )
 
 // GetLocalStorageByNode Get localstorage object by nodeName, error when not found
@@ -54,53 +64,56 @@ func GetLocalStorageByNode(lsLister localstorage.LocalStorageLister, nodeName st
 	return target, nil
 }
 
-// CreateLocalStorage create localstorage if not present
-// 创建localstorage
-func CreateLocalStorage(kubeClientSet kubernetes.Interface, lsClientSet versioned.Interface) error {
-	// TODO: need to optimise
-	// Get all exists kubernetes nodes
-	nodes, err := kubeClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+func GetLocalStorageMap(lsLister localstorage.LocalStorageLister) (map[string]*localstoragev1.LocalStorage, error) {
+	ret, err := lsLister.List(labels.Everything())
 	if err != nil {
-		return err
+		return nil, err
+	}
+	lsMap := make(map[string]*localstoragev1.LocalStorage)
+	for _, ls := range ret {
+		lsMap[ls.Spec.Node] = ls
+	}
+
+	return lsMap, nil
+}
+
+// CreateLocalStorages create localstorage by node if not present
+func CreateLocalStorages(lsClientSet versioned.Interface, nodeNames ...string) error {
+	if len(nodeNames) == 0 {
+		return nil
 	}
 
 	// Get all exist localstorage object
-	localstorages, err := lsClientSet.StorageV1().LocalStorages().List(context.TODO(), metav1.ListOptions{})
+	localStorages, err := lsClientSet.StorageV1().LocalStorages().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
-	localstorageMap := make(map[string]localstoragev1.LocalStorage)
-	for _, localstorage := range localstorages.Items {
-		localstorageMap[localstorage.Spec.Node] = localstorage // nodeName映射localstorage
+	lsNodeNames := sets.NewString()
+	for _, ls := range localStorages.Items {
+		// do nothing if the localstorage present
+		lsNodeNames.Insert(ls.Spec.Node)
 	}
 
-	for _, node := range nodes.Items {
-		labels := node.GetLabels()
-		if labels == nil {
+	for _, nodeName := range nodeNames {
+		if lsNodeNames.Has(nodeName) {
 			continue
 		}
-
-		// check whether need to created
-		_, exists := labels[types.LabelStorageNode]
-		if exists {
-			_, found := localstorageMap[node.Name]
-			if found {
-				continue
-			}
-
-			// TODO: to optimise
-			if _, err = lsClientSet.StorageV1().LocalStorages().Create(context.TODO(), &localstoragev1.LocalStorage{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "ls-" + node.Name,
+		if _, err = lsClientSet.StorageV1().LocalStorages().Create(context.TODO(), &localstoragev1.LocalStorage{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "ls-" + nodeName,
+			},
+			Spec: localstoragev1.LocalStorageSpec{
+				Node: nodeName,
+				// TODO: 先阶段仅支持 path 模式
+				Path: &localstoragev1.PathSpec{
+					VolumeDir: "/data",
 				},
-				Spec: localstoragev1.LocalStorageSpec{
-					VolumeGroup: "k8s",
-					Node:        node.Name,
-				},
-			}, metav1.CreateOptions{}); err != nil {
-				return err
-			}
+			},
+		}, metav1.CreateOptions{}); err != nil {
+			return err
 		}
+
+		klog.Infof("Create %s localstorage success", nodeName)
 	}
 
 	return nil
@@ -133,4 +146,87 @@ func GetNameFromNode(node *v1.Node) string {
 	}
 
 	return node.ObjectMeta.Annotations[types.AnnotationKeyNodeID]
+}
+
+func GetLocalStoragePersistentVolumeClaimFromPod(pod *v1.Pod, pvcLister corelisters.PersistentVolumeClaimLister, scLister storagelisters.StorageClassLister) (*v1.PersistentVolumeClaim, error) {
+	volumes := pod.Spec.Volumes
+	if volumes == nil || len(volumes) == 0 {
+		return nil, nil
+	}
+
+	for _, volume := range volumes {
+		if volume.PersistentVolumeClaim == nil {
+			continue
+		}
+
+		claimName := volume.PersistentVolumeClaim.ClaimName
+		pvc, err := util.WaitUntilPersistentVolumeClaimIsCreated(pvcLister, pod.Namespace, claimName, 2*time.Second)
+		if err != nil {
+			return nil, err
+		}
+
+		storageClassName := pvc.Spec.StorageClassName
+		if storageClassName == nil || len(*storageClassName) == 0 {
+			continue
+		}
+		sc, err := scLister.Get(*storageClassName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get sc %s from indexer: %v", *storageClassName, err)
+		}
+		if sc.Provisioner == DefaultDriverName {
+			return pvc, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func PodIsUseLocalStorage(pod *v1.Pod, pvcLister corelisters.PersistentVolumeClaimLister, scLister storagelisters.StorageClassLister) (bool, error) {
+	pvc, err := GetLocalStoragePersistentVolumeClaimFromPod(pod, pvcLister, scLister)
+	if err != nil {
+		return false, err
+	}
+
+	return pvc != nil, nil
+}
+
+func TryUpdateLocalStorage(client versioned.Interface, ls *localstoragev1.LocalStorage) error {
+	_, err := client.
+		StorageV1().
+		LocalStorages().
+		Update(context.TODO(), ls, metav1.UpdateOptions{})
+	return err
+}
+
+func UpdateLocalStoragePhase(client versioned.Interface, ls *localstoragev1.LocalStorage, Phase localstoragev1.LocalStoragePhase) error {
+	ls.Status.Phase = Phase
+	return TryUpdateLocalStorage(client, ls)
+}
+
+func GetVolumeDirFromLocalStorage(ls *localstoragev1.LocalStorage) (string, error) {
+	if ls.Spec.Path != nil {
+		return ls.Spec.Path.VolumeDir, nil
+	}
+
+	return "", fmt.Errorf("spec.path is nil")
+}
+
+func CreateVolumeDir(path string) error {
+	if err := os.MkdirAll(path, os.ModePerm); err != nil {
+		return err
+	}
+	// 给目录赋权限（目录在创建时由于umask原因，即使是给满权限，也有可能会把你的权限给降低，所以采用后置赋权）
+	if err := os.Chmod(path, os.ModePerm); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func DeleteVolumeDir(path string) error {
+	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	return nil
 }
